@@ -157,6 +157,69 @@ def stop_container(request, container_id):
         return JsonResponse({'status': 'error', 'message': str(e)})
 
 
+def delete_container(request, container_id):
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_id)
+        container.remove(force=True)
+        return JsonResponse({'status': 'success'})
+    except docker.errors.APIError as e:
+        return JsonResponse({'status': 'error', 'message': str(e)})
+
+from django.http import JsonResponse
+
+def delete_image(request):
+    if request.method == 'POST':
+        repository = request.POST.get('repository')
+        try:
+            client = docker.from_env()
+            # Remove image from Docker
+            client.images.remove(repository, force=True)
+            return JsonResponse({'status': 'success'})
+        except docker.errors.APIError as e:
+            return JsonResponse({'status': 'error', 'message': str(e)})
+    else:
+        return JsonResponse({'error': 'Only POST requests are allowed.'}, status=405)
+
+
+# views.py
+import docker
+from django.shortcuts import render
+from django.http import JsonResponse
+
+def all_containers(request):
+    try:
+        # Connect to the Docker daemon
+        client = docker.from_env()
+        # Get a list of all containers
+        containers = client.containers.list(all=True)
+        # Prepare container information
+        container_info = []
+        for container in containers:
+            # Parse the creation time string into a datetime object
+            created_time = datetime.strptime(container.attrs['Created'][:19], '%Y-%m-%dT%H:%M:%S')
+            
+            # Calculate the time difference between current time and creation time
+            time_difference = datetime.utcnow() - created_time
+            
+            # Extract the number of hours
+            hours_ago = int(time_difference.total_seconds() / 3600)
+            
+            # Format the "hours ago" string
+            container.created_ago = f"{hours_ago} hours ago"
+            container_info.append({
+                'id': container.short_id,
+                'name': container.name,
+                'status': container.status,
+                'image': container.image.tags[0],
+                'created': container.attrs['Created'],
+                'created_ago': container.created_ago,
+
+            })
+        return render(request, 'allcontainers.html', {'containers': container_info})
+    except Exception as e:
+        return render(request, 'error.html', {'error': str(e)})
+
 
 
 
