@@ -8,8 +8,9 @@ from django.utils import timezone
 def homepage(request):
     return render(request,"firstboard.html")
 
-from django.http import JsonResponse
-import docker
+from datetime import datetime
+from django.utils import timezone
+from dateutil import parser
 
 def list_docker_images(request):
     client = docker.from_env()
@@ -34,7 +35,7 @@ def list_docker_images(request):
 
             # Convert image size to MB
             image_size = round(image.attrs['Size'] / (1024 * 1024), 2)
-            created_time = datetime.strptime(image.attrs['Created'], '%Y-%m-%dT%H:%M:%SZ')
+            created_time = parser.parse(image.attrs['Created']).replace(tzinfo=None)  # Remove timezone information
             created_time = timezone.make_aware(created_time)  # Make the datetime object timezone-aware
             time_difference = current_time - created_time
             days_ago = time_difference.days
@@ -42,7 +43,7 @@ def list_docker_images(request):
                 'repository': image.tags[0] if image.tags else '',
                 'id': image_id,
                 'size': f"{image_size} MB",
-                 'created': f"{days_ago} days ago"
+                'created': f"{days_ago} days ago"
             }
             image_details.append(image_info)
         return render(request, 'firstboard.html', {'images': image_details, 'total_images': total_images, 'total_containers': total_containers,'running_containers':running_containers,'stopped_containers':stopped_containers})
@@ -50,6 +51,8 @@ def list_docker_images(request):
         return render(request, 'firstboard.html', {'error': str(e)})
     except Exception as e:
         return render(request, 'firstboard.html', {'error': str(e)})
+
+
 
 
 
@@ -220,9 +223,141 @@ def all_containers(request):
     except Exception as e:
         return render(request, 'error.html', {'error': str(e)})
 
+# def analysis_board(request):
+#     return render(request,'analysis_dashboard.html')
+
+# views.py
+from django.shortcuts import render
+from django.http import JsonResponse
+import docker
+
+def analysis_board(request):
+    try:
+        context = analysis()
+        return render(request, 'analysis_dashboard.html',context)
+    except:
+        return redirect('hompage')
 
 
+def analysis_update(request):
+    try:
+        context = analysis()
+        return JsonResponse(context)
+    except:
+        return redirect('homepage')
 
+def analysis():
+    client = docker.from_env()
+    
+    # Fetch list of containers
+    containers = client.containers.list()
+    
+    # Initialize lists to store data for calculations
+    cpu_usages = []
+    mem_usages = []
+    network_io = []
+    pids = []
+    mem_usage = 0
+    
+    # Collect data for each container
+    for container in containers:
+        stats = container.stats(stream=False)
+        
+        # CPU usage calculation
+        cpu_percent = stats['cpu_stats']['cpu_usage']['total_usage'] / stats['cpu_stats']['system_cpu_usage'] * 100
+        cpu_usages.append(cpu_percent)
+        
+        # Memory usage calculation
+        mem_usage_percent = stats['memory_stats']['usage'] / stats['memory_stats']['limit'] * 100
+        mem_usage = mem_usage + stats['memory_stats']['usage']
+        mem_usages.append(mem_usage_percent)
+        
+        # Network I/O calculation
+        network_io.append(stats['networks']['eth0']['rx_bytes'] + stats['networks']['eth0']['tx_bytes'])
+        
+        # PID count calculation
+        pids.append(stats['pids_stats']['current'])
+
+    # Calculate averages
+    average_cpu_usage = round(sum(cpu_usages) / len(cpu_usages), 4) if cpu_usages else 0
+    average_mem_usage = round(sum(mem_usages) / len(mem_usages), 2) if mem_usages else 0
+    average_network_io = round(sum(network_io) / len(network_io), 2) if network_io else 0
+    average_pids = round(sum(pids) / len(pids), 2) if pids else 0
+    
+    # Calculate remaining capacities
+    remaining_cpu_capacity = round(100 - average_cpu_usage, 2)
+    remaining_network_capacity = round(100 - average_network_io, 2)
+    remaining_mem_capacity = round(100 - average_mem_usage, 2)
+    remaining_pid_count = len(pids)
+
+    # Prepare context data to pass to template
+    context = {
+        'average_cpu_usage': average_cpu_usage,
+        'average_mem_usage': average_mem_usage,
+        'average_network_io': average_network_io,
+        'average_pids': average_pids,
+        'remaining_cpu_capacity': remaining_cpu_capacity,
+        'remaining_network_capacity': remaining_network_capacity,
+        'remaining_mem_capacity': remaining_mem_capacity,
+        'remaining_pid_count': remaining_pid_count,
+        'mem_usage': round(mem_usage / (1024 * 1024), 2)
+    }
+    return context
+
+
+import docker
+
+def container_update(request,container_id):
+    try:
+        context = c_analysis(container_id)
+        return JsonResponse(context)
+    except:
+        return redirect('homepage')
+
+def container_analysis(request, container_id):
+    try:
+        context = c_analysis(container_id)
+        return render(request, 'container_analysis.html',context)
+    except:
+        return redirect('homepage')
+
+def c_analysis(container_id):
+    client = docker.from_env()
+    
+    # Get container object
+    container = client.containers.get(container_id)
+    
+    # Get container stats
+    stats = container.stats(stream=False)
+    
+    # Calculate CPU usage
+    cpu_percent = stats['cpu_stats']['cpu_usage']['total_usage'] / stats['cpu_stats']['system_cpu_usage'] * 100
+    
+    # Calculate memory usage
+    mem_usage_percent = stats['memory_stats']['usage'] / stats['memory_stats']['limit'] * 100
+    mem_usage_mb = stats['memory_stats']['usage'] / (1024 * 1024)
+    
+    # Get container inspect data
+    inspect_data = container.attrs
+    
+    # Get the last 20 recent lines of logs
+    logs = container.logs(tail=20).decode('utf-8')
+    status = container.status
+    remaining_cpu = 100 - cpu_percent
+    remaining_mem = 100- mem_usage_percent
+    # Prepare context data to pass to template
+    context = {
+        'container_id': container_id,
+        'cpu_usage_percent': round(cpu_percent, 4),
+        'mem_usage_percent': round(mem_usage_percent, 4),
+        'mem_usage_mb': round(mem_usage_mb, 2),
+        'logs': logs,
+        'inspect_data': inspect_data,
+        'status': status,
+        'remaining_cpu':round(remaining_cpu,4),
+        'remaining_mem':round(remaining_mem,4),
+    }
+    return context
 
 
 

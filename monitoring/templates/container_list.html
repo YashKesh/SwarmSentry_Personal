@@ -74,6 +74,16 @@
                 >
                   Creation time
                 </th>
+                <th
+                  class="text-uppercase text-secondary text-sm font-weight-bolder text-center opacity-7 ps-2"
+                >
+                  Actions
+                </th>
+                <th
+                  class="text-uppercase text-secondary text-sm font-weight-bolder text-center opacity-7 ps-2"
+                >
+                  Analysis
+                </th>
                 <!-- <th class="text-uppercase text-secondary text-sm font-weight-bolder text-center opacity-7 ps-2">PORTS</th> -->
               </tr>
             </thead>
@@ -164,6 +174,16 @@
                     Delete
                   </button>
                 </td>
+                <td>
+                  {% if container.status == 'running' %}
+                      <button type="button" class="btn btn-danger" style="margin-top: 1rem">
+                          <a href="{% url 'container_analysis' container_id=container.id %}" style="color: white">View Analysis</a>
+                      </button>
+                  {% else %}
+                      <span style="color: gray;">Not Available</span>
+                  {% endif %}
+              </td>
+              
               </tr>
               {% empty %}
               <tr>
